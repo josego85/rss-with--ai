@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python virtual environment setup
 - Basic project documentation
 - Requirements.txt for dependencies
+- Enhanced README.md with status badges (version, license, Python version, maintenance, issues, PRs, code style, downloads)
 
 ### Dependencies
 - Python 3.11 requirement

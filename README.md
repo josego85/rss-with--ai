@@ -1,5 +1,14 @@
 # 📰 RSS-WITH-AI
 
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/josego85/rss-with--ai)
+[![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)](LICENSE)
+[![Python Version](https://img.shields.io/badge/python-3.11-green.svg)](https://www.python.org/)
+[![Maintenance](https://img.shields.io/badge/maintained-yes-green.svg)](https://github.com/josego85/rss-with--ai)
+[![Issues](https://img.shields.io/github/issues/josego85/rss-with--ai)](https://github.com/josego85/rss-with--ai/issues)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/josego85/rss-with--ai/pulls)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Downloads](https://img.shields.io/github/downloads/josego85/rss-with--ai/total.svg)](https://github.com/josego85/rss-with--ai/releases)
+
 This Python script processes articles from technology RSS feeds using AI to automatically filter and summarize the most relevant content. The results are saved as `.md` (Markdown) and `.html` files.
 
 ---
