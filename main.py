@@ -7,150 +7,219 @@ from datetime import datetime
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-
 from deep_translator import GoogleTranslator
 
-# List of RSS feed URLs
-rss_feeds = [
-    "https://www.omgubuntu.co.uk/feed"
-]
+from config import (
+    CLASSIFICATION_MODEL,
+    SUMMARY_MODEL,
+    RSS_FEEDS,
+    MIN_CONTENT_LENGTH,
+    MAX_CLASSIFICATION_LENGTH,
+    RELEVANCE_THRESHOLD,
+    MAX_SUMMARY_LENGTH,
+    SUMMARY_MAX_LENGTH,
+    SUMMARY_MIN_LENGTH,
+    OUTPUT_DIR,
+    MAX_ARTICLES,
+)
+from feedback import FeedbackSystem
 
-# Load AI classification and summarization models
-try:
-    clasificador_ia = pipeline("text-classification", model="mrm8488/bert-mini-finetuned-age_news-classification")
-    resumen_ia = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
-except Exception as e:
-    print(f"⚠️ Error loading AI models: {e}")
-    clasificador_ia = None
-    resumen_ia = None
 
-# Helper function to download a feed
-def fetch_feed(url):
-    return feedparser.parse(url).entries
+class RSSProcessor:
+    def __init__(self):
+        """Initialize RSS processor with feedback system and AI models"""
+        self.feedback_system = FeedbackSystem()
+        self._load_ai_models()
 
-# Function to download and parse articles with concurrency (download only)
-def descargar_articulos():
-    entradas = []
-    with ThreadPoolExecutor() as executor:
-        results = executor.map(fetch_feed, rss_feeds)
-        for r in results:
-            entradas.extend(r)
-    return entradas
-
-# Process a single article (sequentially)
-def procesar_entrada(entry):
-    try:
-        response = requests.get(entry.link, timeout=10)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        paragraphs = soup.find_all('p')
-        contenido = ' '.join([para.get_text() for para in paragraphs])
-    except:
-        return None
-
-    if not contenido.strip():
-        return None
-
-    if "subscriber of LWN.net" in contenido.lower() or len(contenido) < 300:
-        return None
-
-    print(f"Viewing: {entry.title}")
-    print(f"URL: {entry.link}")
-    print("Extracted content:")
-    print(contenido[:500])
-
-    try:
-        idioma_original = detect(contenido)
-    except:
-        idioma_original = 'en'
-
-    texto_para_clasificar = contenido.strip().replace("\n", " ")[:1000]
-
-    try:
-        if clasificador_ia:
-            resultado = clasificador_ia(texto_para_clasificar)[0]
-            print(f"🤖 AI Classification: {resultado['label']} (score: {resultado['score']:.2f})")
-            if resultado['label'].lower() not in ['tech', 'sci/tech']:
-                return None
-        else:
-            print("⚠️ Classifier not available. Including by default.")
-    except Exception as e:
-        print(f"⚠️ Error classifying content: {e}")
-        return None
-
-    if idioma_original != 'es':
+    def _load_ai_models(self):
+        """Load classification and summarization models"""
         try:
-            contenido = GoogleTranslator(source='auto', target='es').translate(text=contenido)
-        except:
+            self.classifier = pipeline(
+                "text-classification", model=CLASSIFICATION_MODEL
+            )
+            self.summarizer = pipeline("summarization", model=SUMMARY_MODEL)
+            print("✅ AI models loaded successfully")
+        except Exception as e:
+            print(f"⚠️ Error loading AI models: {e}")
+            self.classifier = None
+            self.summarizer = None
+
+    def fetch_feed(self, url):
+        """Fetch RSS feed entries from a URL"""
+        try:
+            return feedparser.parse(url).entries
+        except Exception as e:
+            print(f"⚠️ Error fetching feed {url}: {e}")
+            return []
+
+    def download_articles(self):
+        """Download articles from all RSS feeds concurrently"""
+        entries = []
+        print(f"📥 Downloading articles from {len(RSS_FEEDS)} feeds...")
+        with ThreadPoolExecutor() as executor:
+            results = executor.map(self.fetch_feed, RSS_FEEDS)
+            for r in results:
+                entries.extend(r)
+        return entries
+
+    def process_entry(self, entry):
+        """Process a single RSS entry"""
+        try:
+            # Fetch and parse content
+            response = requests.get(entry.link, timeout=10)
+            soup = BeautifulSoup(response.content, "html.parser")
+            paragraphs = soup.find_all("p")
+            content = " ".join([para.get_text() for para in paragraphs])
+
+            if not content.strip() or len(content) < MIN_CONTENT_LENGTH:
+                return None
+
+            print(f"📝 Processing: {entry.title}")
+            print(f"🔗 URL: {entry.link}")
+
+            # Detect language and translate if needed
+            try:
+                original_language = detect(content)
+                if original_language != "es":
+                    content = GoogleTranslator(source="auto", target="es").translate(
+                        text=content
+                    )
+                    print(f"🌐 Translated from {original_language} to Spanish")
+            except Exception as e:
+                print(f"⚠️ Translation error: {e}")
+                return None
+
+            # Classify content
+            classification_text = content.strip().replace("\n", " ")[:MAX_CLASSIFICATION_LENGTH]
+            if self.classifier:
+                result = self.classifier(classification_text)[0]
+                base_score = result["score"]
+
+                # Adjust score based on feedback
+                adjustment = self.feedback_system.get_relevance_adjustment(entry.link)
+                final_score = min(1.0, max(0.0, base_score + adjustment))
+
+                if final_score < RELEVANCE_THRESHOLD:
+                    return None
+
+                print(f"🤖 Classification: {result['label']} (score: {final_score:.2f})")
+
+                # Add automatic feedback
+                self.feedback_system.add_feedback(
+                    url=entry.link,
+                    is_relevant=True,
+                    category=result['label']
+                )
+
+            # Generate summary
+            summary_text = content.strip().replace("\n", " ")[:MAX_SUMMARY_LENGTH]
+            if self.summarizer:
+                summary = self.summarizer(
+                    summary_text,
+                    max_length=SUMMARY_MAX_LENGTH,
+                    min_length=SUMMARY_MIN_LENGTH,
+                    do_sample=False,
+                )[0]["summary_text"]
+                print("✂️ Summary generated")
+            else:
+                summary = summary_text[:700] + "..."
+
+            return {
+                "title": entry.title,
+                "link": entry.link,
+                "summary": summary,
+                "score": final_score,
+                "date": entry.get("published_parsed", None),
+                "category": result.get('label', 'general')
+            }
+
+        except Exception as e:
+            print(f"⚠️ Error processing entry: {e}")
             return None
 
-    texto_para_resumen = contenido.strip().replace("\n", " ")[:2000]
+    def save_markdown(self, articles, filename):
+        """Save articles as Markdown file"""
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        output_path = os.path.join(OUTPUT_DIR, filename)
 
-    print(f"✏️ Summarizing article: {entry.title}")
-    try:
-        if resumen_ia:
-            resumen = resumen_ia(texto_para_resumen, max_length=350, min_length=200, do_sample=False)[0]['summary_text']
-        else:
-            resumen = texto_para_resumen[:700] + "..."
-    except Exception as e:
-        print(f"⚠️ Error summarizing with AI: {e}")
-        resumen = texto_para_resumen[:700] + "..."
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(f"# 📰 Daily Summary - {datetime.now().strftime('%Y-%m-%d')}\n\n")
+            for article in articles:
+                f.write(f"## [{article['title']}]({article['link']})\n")
+                f.write(f"{article['summary']}\n\n")
+                f.write(f"_Category: {article['category']} | Score: {article['score']:.2f}_\n\n")
 
-    return {
-        'titulo': entry.title,
-        'link': entry.link,
-        'resumen': resumen
-    }
+        print(f"✅ Summary saved as Markdown in: {output_path}")
 
-# Function to get and process articles sequentially
-def obtener_articulos():
-    articulos_relevantes = []
-    entradas = descargar_articulos()
+    def save_html(self, articles, filename):
+        """Save articles as HTML file"""
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        output_path = os.path.join(OUTPUT_DIR, filename)
 
-    inicio = time.time()
-    for entrada in entradas:
-        resultado = procesar_entrada(entrada)
-        if resultado:
-            articulos_relevantes.append(resultado)
-    fin = time.time()
-    print(f"⏱️ Total processing time: {fin - inicio:.2f} seconds")
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(f"""
+            <html>
+                <head>
+                    <meta charset='utf-8'>
+                    <title>Daily Summary {datetime.now().strftime("%Y-%m-%d")}</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 40px; }}
+                        h1 {{ color: #2c3e50; }}
+                        h2 {{ color: #34495e; }}
+                        a {{ color: #3498db; text-decoration: none; }}
+                        a:hover {{ text-decoration: underline; }}
+                        .metadata {{ color: #7f8c8d; font-style: italic; }}
+                    </style>
+                </head>
+                <body>
+            """)
+            f.write(f"<h1>📰 Daily Summary - {datetime.now().strftime('%Y-%m-%d')}</h1>")
+            for article in articles:
+                f.write(f"<h2><a href='{article['link']}'>{article['title']}</a></h2>")
+                f.write(f"<p>{article['summary']}</p>")
+                f.write(f"<p class='metadata'>Category: {article['category']} | Score: {article['score']:.2f}</p>")
+            f.write("</body></html>")
 
-    return articulos_relevantes
+        print(f"✅ Summary saved as HTML in: {output_path}")
 
-# Save summary in Markdown
-def guardar_markdown(articulos):
-    fecha = datetime.now().strftime("%Y-%m-%d")
-    os.makedirs("output", exist_ok=True)
-    filename = os.path.join("output", f"resumen_{fecha}.md")
+    def process_feeds(self):
+        """Process all RSS feeds and return relevant articles"""
+        start_time = time.time()
+        entries = self.download_articles()
 
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(f"# \U0001F4F0 Daily Summary - {fecha}\n\n")
-        for articulo in articulos:
-            f.write(f"## [{articulo['titulo']}]({articulo['link']})\n")
-            f.write(f"{articulo['resumen']}\n\n")
+        relevant_articles = []
+        for entry in entries:
+            result = self.process_entry(entry)
+            if result:
+                relevant_articles.append(result)
 
-    print(f"\u2705 Summary saved as Markdown in: {filename}")
+        # Sort by score and date
+        relevant_articles.sort(
+            key=lambda x: (x["score"], x.get("date", 0)), reverse=True
+        )
+        relevant_articles = relevant_articles[:MAX_ARTICLES]
 
-# Save summary in HTML
-def guardar_html(articulos):
-    fecha = datetime.now().strftime("%Y-%m-%d")
-    os.makedirs("output", exist_ok=True)
-    filename = os.path.join("output", f"resumen_{fecha}.html")
+        end_time = time.time()
+        print(f"⏱️ Total processing time: {end_time - start_time:.2f} seconds")
+        print(f"📊 Found {len(relevant_articles)} relevant articles out of {len(entries)}")
 
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(f"<html><head><meta charset='utf-8'><title>Daily Summary {fecha}</title></head><body>")
-        f.write(f"<h1>\U0001F4F0 Daily Summary - {fecha}</h1>")
-        for articulo in articulos:
-            f.write(f"<h2><a href='{articulo['link']}'>{articulo['titulo']}</a></h2>")
-            f.write(f"<p>{articulo['resumen']}</p>")
-        f.write("</body></html>")
+        return relevant_articles
 
-    print(f"\u2705 Summary saved as HTML in: {filename}")
 
-# Run the script
-if __name__ == '__main__':
-    articulos = obtener_articulos()
-    if articulos:
-        guardar_markdown(articulos)
-        guardar_html(articulos)
+def main():
+    """Main execution function"""
+    print("🚀 Starting RSS processor...")
+    processor = RSSProcessor()
+    articles = processor.process_feeds()
+
+    if articles:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        processor.save_markdown(articles, f"summary_{date_str}.md")
+        processor.save_html(articles, f"summary_{date_str}.html")
+        print("✨ Processing completed successfully!")
     else:
-        print('No relevant articles found.')
+        print("❌ No relevant articles found.")
+
+
+if __name__ == "__main__":
+    main()
