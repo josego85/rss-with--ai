@@ -1,0 +1,9 @@
+feedparser
+requests
+beautifulsoup4
+langdetect
+transformers==4.35.2
+torch==2.1.0
+sentencepiece
+numpy==1.26.4
+deep-translator
