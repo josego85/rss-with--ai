@@ -11,6 +11,18 @@
 
 This Python script processes articles from technology RSS feeds using AI to automatically filter and summarize the most relevant content. The results are saved as `.md` (Markdown) and `.html` files.
 
+## 📑 Table of Contents
+- [Features](#-features)
+- [Requirements](#️-requirements)
+- [Installation](#-installation)
+- [Usage](#-usage)
+  - [Output Structure](#output-structure)
+  - [Feedback System](#feedback-system)
+- [Models Used](#-models-used)
+- [Configuration](#-configuration)
+- [Contributing](#-contributing)
+- [Contact](#-contact)
+
 ---
 
 ## ✅ Features
@@ -20,7 +32,13 @@ This Python script processes articles from technology RSS feeds using AI to auto
 - 🌐 Translates to Spanish if necessary
 - 🧠 Uses AI to classify and filter only relevant articles
 - ✂️ Automatically summarizes content with a language model
-- 📝 Exports results in Markdown and HTML files
+- 📝 Exports results in Markdown and HTML formats
+- 📊 Feedback system for continuous learning
+- 🎯 Automatic score adjustment based on historical feedback
+- ⚡ Concurrent RSS feed processing
+- 🎨 Enhanced HTML output with styling
+- 📈 Progress indicators with emojis
+- ⚠️ Improved error handling and logging
 
 ---
 
@@ -58,7 +76,34 @@ Simply run:
 python main.py
 ```
 
-The output files will be located in the `output/` folder.
+The script will:
+1. Download articles from configured RSS feeds
+2. Process them using AI models
+3. Apply feedback-based relevance adjustments
+4. Generate summaries
+5. Save results in the `output/` folder
+
+### Output Structure
+
+```
+output/
+├── summary_2025-04-06.md   # Markdown summary
+└── summary_2025-04-06.html # HTML summary with styling
+```
+
+### Feedback System
+
+The script maintains a feedback database in:
+
+```
+data/
+└── feedback.json   # Historical feedback data
+```
+
+This helps improve article selection over time by:
+- Tracking article relevance
+- Adjusting scores based on past feedback
+- Learning from user preferences
 
 ---
 
@@ -68,6 +113,16 @@ The output files will be located in the `output/` folder.
 - `sshleifer/distilbart-cnn-12-6` → Automatic summarization
 
 ---
+
+## 🔧 Configuration
+
+Key settings in `config.py`:
+
+```python
+MAX_ARTICLES = 10              # Maximum articles to show
+RELEVANCE_THRESHOLD = 0.85     # Minimum relevance score
+MIN_CONTENT_LENGTH = 300       # Minimum article length
+```
 
 ## 🤝 Contributing
 
